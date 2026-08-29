@@ -4,7 +4,7 @@ RESTAURANT_DESCRIPTION = (
     "An AI-powered restaurant reservation assistant that can answer "
     "questions from restaurant documents and help guests reserve a table."
 )
-GEMINI_MODEL = "gemini-3.6-flash"
+GEMINI_MODEL = "gemini-2.5-flash-lite"
 EMBEDDING_MODEL = "gemini-embedding-001"
 MEMORY_LIMIT = 25
 AI_MEMORY_LIMIT = 20
