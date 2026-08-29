@@ -29,23 +29,30 @@ def safe_json_from_text(text):
 
     try:
         return json.loads(cleaned)
+
     except json.JSONDecodeError:
         start = cleaned.find("{")
         end = cleaned.rfind("}")
+
         if start >= 0 and end > start:
             return json.loads(cleaned[start : end + 1])
+
         raise
 
 
 def analyze_booking_message(message, booking, booking_active=False):
     """
-    Use Gemini to understand restaurant-reservation intent and extract
-    any details already present in a user's message.
+    Use the configured AI model to understand restaurant-reservation
+    intent and extract details already present in the user's message.
     """
+
     client = get_gemini_client()
 
     today = date.today().isoformat()
-    current_state = json.dumps(booking, ensure_ascii=False)
+    current_state = json.dumps(
+        booking,
+        ensure_ascii=False,
+    )
 
     prompt = f"""
 Today is {today}.
@@ -86,12 +93,14 @@ USER MESSAGE:
 {message}
 """
 
-    interaction = client.interactions.create(
+    response = client.models.generate_content(
         model=GEMINI_MODEL,
-        input=prompt,
+        contents=prompt,
     )
 
-    result = safe_json_from_text(interaction.output_text)
+    result = safe_json_from_text(
+        response.text
+    )
 
     allowed = {
         "intent",
@@ -106,11 +115,15 @@ USER MESSAGE:
         "special_requests",
     }
 
-    return {key: result.get(key) for key in allowed}
+    return {
+        key: result.get(key)
+        for key in allowed
+    }
 
 
 def rag_tool(query, vector_store):
     """RAG tool: query -> top relevant PDF chunks."""
+
     if not vector_store:
         return []
 
@@ -123,38 +136,74 @@ def rag_tool(query, vector_store):
 
 def booking_persistence_tool(booking):
     """Booking persistence tool: structured payload -> booking ID."""
+
     from db.database import save_booking
 
     booking_id = save_booking(booking)
-    return {"success": True, "booking_id": booking_id}
+
+    return {
+        "success": True,
+        "booking_id": booking_id,
+    }
 
 
 def booking_retrieval_tool(email=None, phone=None):
     """Booking retrieval tool: customer contact -> matching reservations."""
+
     from db.database import get_bookings_by_contact
 
-    return get_bookings_by_contact(email=email, phone=phone)
+    return get_bookings_by_contact(
+        email=email,
+        phone=phone,
+    )
 
 
 def email_tool(to_email, subject, body):
     """Email tool: to_email/subject/body -> success/failure."""
+
     from app.email_service import send_email
 
-    return send_email(to_email, subject, body)
+    return send_email(
+        to_email,
+        subject,
+        body,
+    )
 
 
-def generate_ai_response(user_message, chat_history, vector_store=None):
-    """Generate a restaurant-aware answer with recent memory + optional RAG context."""
+def generate_ai_response(
+    user_message,
+    chat_history,
+    vector_store=None,
+):
+    """
+    Generate a restaurant-aware response with recent conversation
+    memory and optional RAG context.
+    """
+
     client = get_gemini_client()
 
-    relevant_chunks = rag_tool(user_message, vector_store)
+    relevant_chunks = rag_tool(
+        user_message,
+        vector_store,
+    )
 
     if relevant_chunks:
-        context = "\n\n---\n\n".join(relevant_chunks)
-    else:
-        context = "No restaurant document context was retrieved for this question."
 
-    recent_history = chat_history[-AI_MEMORY_LIMIT:]
+        context = "\n\n---\n\n".join(
+            relevant_chunks
+        )
+
+    else:
+
+        context = (
+            "No restaurant document context was retrieved "
+            "for this question."
+        )
+
+    recent_history = chat_history[
+        -AI_MEMORY_LIMIT:
+    ]
+
     history_text = "\n".join(
         f"{message['role']}: {message['content']}"
         for message in recent_history
@@ -191,9 +240,9 @@ LATEST USER MESSAGE:
 Respond naturally as the restaurant assistant.
 """
 
-    interaction = client.interactions.create(
+    response = client.models.generate_content(
         model=GEMINI_MODEL,
-        input=prompt,
+        contents=prompt,
     )
 
-    return interaction.output_text
+    return response.text
