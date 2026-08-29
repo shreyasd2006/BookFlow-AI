@@ -129,6 +129,13 @@ def booking_persistence_tool(booking):
     return {"success": True, "booking_id": booking_id}
 
 
+def booking_retrieval_tool(email=None, phone=None):
+    """Booking retrieval tool: customer contact -> matching reservations."""
+    from db.database import get_bookings_by_contact
+
+    return get_bookings_by_contact(email=email, phone=phone)
+
+
 def email_tool(to_email, subject, body):
     """Email tool: to_email/subject/body -> success/failure."""
     from app.email_service import send_email

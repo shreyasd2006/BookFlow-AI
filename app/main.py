@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -21,8 +22,8 @@ from app.chat_logic import analyze_message, generate_general_response
 from app.config import MEMORY_LIMIT, RESTAURANT_DESCRIPTION, RESTAURANT_NAME, RESTAURANT_TAGLINE
 from app.email_service import send_booking_confirmation
 from app.rag_pipeline import create_vector_store, chunk_text, extract_text_from_pdf
-from db.database import initialize_database
-from app.tools import booking_persistence_tool
+from app.tools import booking_persistence_tool, booking_retrieval_tool
+from db.database import get_bookings_by_contact, initialize_database
 
 
 st.set_page_config(
@@ -32,10 +33,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
-# =================================================
-# UI STYLING
-# =================================================
 
 st.markdown(
     """
@@ -91,10 +88,6 @@ st.markdown(
             font-weight: 700;
         }
 
-        .feature-note {
-            min-height: 130px;
-        }
-
         .sidebar-brand {
             font-size: 1.45rem;
             font-weight: 800;
@@ -148,9 +141,12 @@ if "vector_store" not in st.session_state:
 if "admin_authenticated" not in st.session_state:
     st.session_state.admin_authenticated = False
 
+if "prefill_message" not in st.session_state:
+    st.session_state.prefill_message = None
+
 
 # =================================================
-# ADMIN PASSWORD
+# HELPERS
 # =================================================
 
 def get_admin_password():
@@ -162,6 +158,21 @@ def get_admin_password():
             pass
 
     return os.getenv("ADMIN_PASSWORD")
+
+
+def format_user_reservations(bookings):
+    lines = []
+    for booking in bookings:
+        status = str(booking.get("status") or "Confirmed")
+        icon = "🟢" if status.lower() == "confirmed" else "🔴"
+        lines.append(
+            f"### {icon} Reservation #{booking['id']}\n"
+            f"**Date:** {booking.get('date', '')}\n\n"
+            f"**Time:** {booking.get('time', '')}\n\n"
+            f"**Guests:** {booking.get('number_of_guests', '')}\n\n"
+            f"**Status:** {status}"
+        )
+    return "\n\n---\n\n".join(lines)
 
 
 # =================================================
@@ -226,11 +237,48 @@ with st.sidebar:
 
     st.divider()
 
+    st.subheader("🔎 Find My Reservation")
+    st.caption("Retrieve your reservation using the same email or phone number used when booking.")
+
+    with st.form("reservation_lookup_form", clear_on_submit=False):
+        lookup_email = st.text_input("Email", placeholder="you@example.com")
+        lookup_phone = st.text_input("Phone", placeholder="Your booking phone number")
+        lookup_submitted = st.form_submit_button("Find My Reservation", width="stretch")
+
+    if lookup_submitted:
+        clean_email = (lookup_email or "").strip()
+        clean_phone = (lookup_phone or "").strip()
+        if not clean_email and not clean_phone:
+            st.warning("Enter your email or phone number to retrieve a reservation.")
+        else:
+            try:
+                with st.spinner("Looking up your reservation..."):
+                    reservations = booking_retrieval_tool(
+                        email=clean_email or None,
+                        phone=clean_phone or None,
+                    )
+
+                if reservations:
+                    st.success(f"Found {len(reservations)} reservation(s).")
+                    for reservation in reservations:
+                        status = str(reservation.get("status") or "Confirmed")
+                        st.markdown(
+                            f"**#{reservation['id']}** · {reservation['date']} at {reservation['time']}  \\n"
+                            f"👥 {reservation.get('number_of_guests', '')} guests · {status}"
+                        )
+                else:
+                    st.info("No reservations were found with those details.")
+            except Exception:
+                st.error("I couldn't retrieve reservations right now. Please try again.")
+
+    st.divider()
+
     if st.button("🗑️ Start New Conversation", width="stretch"):
         st.session_state.messages = []
         st.session_state.booking = create_empty_booking()
         st.session_state.booking_active = False
         st.session_state.awaiting_confirmation = False
+        st.session_state.prefill_message = None
         st.rerun()
 
 
@@ -240,7 +288,7 @@ with st.sidebar:
 
 if page == "🔐 Admin Dashboard":
     st.title("🔐 Restaurant Admin Dashboard")
-    st.caption("Secure access to reservation information")
+    st.caption("Secure access to reservation information and management tools")
 
     if not st.session_state.admin_authenticated:
         with st.container(border=True):
@@ -268,7 +316,7 @@ if page == "🔐 Admin Dashboard":
 
     left, right = st.columns([6, 1])
     with left:
-        st.caption("Monitor and search restaurant reservations.")
+        st.caption("Search, edit, cancel, and export restaurant reservations.")
     with right:
         if st.button("Logout", width="stretch"):
             st.session_state.admin_authenticated = False
@@ -291,7 +339,7 @@ st.markdown(
         <div class="hero-title">Your table, sorted. 🍽️</div>
         <div class="hero-copy">
             {RESTAURANT_DESCRIPTION}
-            Ask about the restaurant, upload a document, or tell me naturally that you'd like a table.
+            Ask about the restaurant, upload a document, retrieve a reservation, or tell me naturally that you'd like a table.
         </div>
     </div>
     """,
@@ -306,32 +354,46 @@ if not st.session_state.messages:
         with st.container(border=True):
             st.markdown("## 🍽️")
             st.markdown("### Reserve a Table")
-            st.caption("Try: “Book dinner for 4 tomorrow at 8 PM.”")
+            st.caption("Book naturally and let the assistant collect only what is missing.")
+            if st.button("Book a table", key="quick_book", width="stretch"):
+                st.session_state.prefill_message = "I'd like to reserve a table."
+                st.rerun()
 
     with c2:
         with st.container(border=True):
             st.markdown("## 📄")
             st.markdown("### Ask the Restaurant")
-            st.caption("Upload a menu or policy PDF and ask questions about it.")
+            st.caption("Upload a menu or policy PDF and ask grounded questions about it.")
+            if st.button("Ask a question", key="quick_question", width="stretch"):
+                st.session_state.prefill_message = "What can you help me with?"
+                st.rerun()
 
     with c3:
         with st.container(border=True):
-            st.markdown("## 🧠")
-            st.markdown("### Context Aware")
-            st.caption("The assistant uses recent conversation context for follow-ups.")
+            st.markdown("## 🔎")
+            st.markdown("### Find a Reservation")
+            st.caption("Use the sidebar to retrieve a reservation by email or phone number.")
+            if st.button("Show retrieval", key="quick_retrieve", width="stretch"):
+                st.session_state.prefill_message = "How can I retrieve my reservation?"
+                st.rerun()
 
     st.divider()
 
 
 for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
+    avatar = "🙂" if message["role"] == "user" else "🧑‍🍳"
+    with st.chat_message(message["role"], avatar=avatar):
         st.markdown(message["content"])
 
 
 user_input = st.chat_input("Message the restaurant assistant...")
 
+if not user_input and st.session_state.prefill_message:
+    user_input = st.session_state.prefill_message
+    st.session_state.prefill_message = None
+
 if user_input:
-    with st.chat_message("user"):
+    with st.chat_message("user", avatar="🙂"):
         st.markdown(user_input)
 
     st.session_state.messages.append({
@@ -347,13 +409,14 @@ if user_input:
 
         if response in {"yes", "y", "confirm"}:
             try:
-                result = booking_persistence_tool(st.session_state.booking)
-                booking_id = result["booking_id"]
+                with st.spinner("🧑‍🍳 Confirming your reservation..."):
+                    result = booking_persistence_tool(st.session_state.booking)
+                    booking_id = result["booking_id"]
 
-                email_sent, _email_message = send_booking_confirmation(
-                    st.session_state.booking,
-                    booking_id,
-                )
+                    email_sent, _email_message = send_booking_confirmation(
+                        st.session_state.booking,
+                        booking_id,
+                    )
 
                 if email_sent:
                     bot_response = (
@@ -380,9 +443,7 @@ if user_input:
                 )
 
         elif response in {"no", "n", "cancel"}:
-            bot_response = (
-                "No problem — the reservation was cancelled and nothing was saved."
-            )
+            bot_response = "No problem — the reservation was cancelled and nothing was saved."
             st.session_state.booking = create_empty_booking()
             st.session_state.booking_active = False
             st.session_state.awaiting_confirmation = False
@@ -395,11 +456,12 @@ if user_input:
     # ---------------------------------------------
     else:
         try:
-            analysis = analyze_message(
-                user_input,
-                st.session_state.booking,
-                st.session_state.booking_active,
-            )
+            with st.spinner("🧑‍🍳 BookFlow AI is thinking..."):
+                analysis = analyze_message(
+                    user_input,
+                    st.session_state.booking,
+                    st.session_state.booking_active,
+                )
         except Exception:
             analysis = {
                 "intent": "unclear",
@@ -419,13 +481,8 @@ if user_input:
         if intent == "booking" or st.session_state.booking_active:
             st.session_state.booking_active = True
 
-            # Extract everything Gemini understood from this message.
-            merge_extracted_details(
-                st.session_state.booking,
-                analysis,
-            )
+            merge_extracted_details(st.session_state.booking, analysis)
 
-            # Validate extracted required details that are present.
             validation_message = None
             for field in [
                 "name",
@@ -460,14 +517,12 @@ if user_input:
                 if missing:
                     bot_response = get_next_question(st.session_state.booking)
                 else:
-                    bot_response = format_booking_summary(
-                        st.session_state.booking
-                    )
+                    bot_response = format_booking_summary(st.session_state.booking)
                     st.session_state.awaiting_confirmation = True
 
         else:
             try:
-                with st.spinner("Thinking..."):
+                with st.spinner("🧑‍🍳 BookFlow AI is thinking..."):
                     bot_response = generate_general_response(
                         message=user_input,
                         chat_history=st.session_state.messages,
@@ -478,7 +533,7 @@ if user_input:
                     "⚠️ I couldn't generate a response right now. Please try again in a moment."
                 )
 
-    with st.chat_message("assistant"):
+    with st.chat_message("assistant", avatar="🧑‍🍳"):
         st.markdown(bot_response)
 
     st.session_state.messages.append({
