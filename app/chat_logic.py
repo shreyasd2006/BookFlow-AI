@@ -1,44 +1,44 @@
-from app.tools import generate_ai_response
+from app.tools import analyze_booking_message, generate_ai_response
 
 
-BOOKING_KEYWORDS = [
+BOOKING_KEYWORDS = {
     "book",
     "booking",
-    "appointment",
     "reserve",
     "reservation",
-    "schedule",
-]
+    "table",
+    "restaurant",
+    "dinner",
+    "lunch",
+}
 
 
-def detect_intent(message):
-    """
-    Detect whether the user is trying to make a booking.
-    """
+def analyze_message(message, booking, booking_active=False):
+    """Use Gemini for intent/detail extraction with a small safety fallback."""
+    try:
+        return analyze_booking_message(
+            message=message,
+            booking=booking,
+            booking_active=booking_active,
+        )
+    except Exception:
+        lowered = str(message).lower()
+        likely_booking = any(word in lowered for word in BOOKING_KEYWORDS)
+        return {
+            "intent": "booking" if likely_booking or booking_active else "general",
+            "name": None,
+            "email": None,
+            "phone": None,
+            "number_of_guests": None,
+            "date": None,
+            "time": None,
+            "occasion": None,
+            "dietary_requirements": None,
+            "special_requests": None,
+        }
 
-    message_lower = message.lower()
 
-    for keyword in BOOKING_KEYWORDS:
-
-        if keyword in message_lower:
-            return "booking"
-
-    return "general"
-
-
-def generate_general_response(
-    message,
-    chat_history,
-    vector_store=None,
-):
-    """
-    Generate an AI response using Gemini.
-
-    The response can use:
-    - Recent conversation history
-    - Retrieved PDF context
-    """
-
+def generate_general_response(message, chat_history, vector_store=None):
     return generate_ai_response(
         user_message=message,
         chat_history=chat_history,

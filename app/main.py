@@ -1,127 +1,127 @@
-import sys
 import os
+import sys
 from pathlib import Path
-from textwrap import dedent
 
 import streamlit as st
 
-
-# =================================================
-# PROJECT ROOT
-# =================================================
-
 ROOT_DIR = Path(__file__).resolve().parent.parent
-
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-
-# =================================================
-# IMPORT PROJECT MODULES
-# =================================================
-
-from app.chat_logic import (
-    detect_intent,
-    generate_general_response,
-)
-
+from app.admin_dashboard import show_admin_dashboard
 from app.booking_flow import (
     create_empty_booking,
+    format_booking_summary,
     get_missing_fields,
     get_next_question,
+    merge_extracted_details,
     update_booking_field,
-    format_booking_summary,
 )
+from app.chat_logic import analyze_message, generate_general_response
+from app.config import MEMORY_LIMIT, RESTAURANT_DESCRIPTION, RESTAURANT_NAME, RESTAURANT_TAGLINE
+from app.email_service import send_booking_confirmation
+from app.rag_pipeline import create_vector_store, chunk_text, extract_text_from_pdf
+from db.database import initialize_database
+from app.tools import booking_persistence_tool
 
-from app.admin_dashboard import (
-    show_admin_dashboard,
-)
-
-from app.rag_pipeline import (
-    extract_text_from_pdf,
-    chunk_text,
-    create_vector_store,
-)
-
-from db.database import (
-    initialize_database,
-    save_booking,
-)
-
-from app.email_service import (
-    send_booking_confirmation,
-)
-
-
-# =================================================
-# PAGE CONFIG
-# =================================================
 
 st.set_page_config(
-    page_title="BookFlow AI",
-    page_icon="📅",
+    page_title=f"{RESTAURANT_NAME} · BookFlow AI",
+    page_icon="🍽️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
 
 # =================================================
-# CUSTOM CSS
+# UI STYLING
 # =================================================
 
 st.markdown(
-    dedent(
-        """
-        <style>
-
-        .stApp {
-            background-color: #0e1117;
-        }
-
+    """
+    <style>
         .block-container {
-            max-width: 1200px;
+            max-width: 1180px;
             padding-top: 2rem;
-            padding-bottom: 2rem;
+            padding-bottom: 3rem;
         }
 
         section[data-testid="stSidebar"] {
-            border-right: 1px solid rgba(255,255,255,0.08);
+            border-right: 1px solid rgba(128,128,128,0.18);
+        }
+
+        .restaurant-hero {
+            padding: 2rem 2.2rem;
+            border-radius: 22px;
+            background: linear-gradient(135deg, rgba(180,118,52,.18), rgba(114,82,50,.08));
+            border: 1px solid rgba(180,118,52,.25);
+            margin-bottom: 1.4rem;
+        }
+
+        .eyebrow {
+            font-size: .78rem;
+            font-weight: 700;
+            letter-spacing: .12em;
+            text-transform: uppercase;
+            opacity: .65;
+        }
+
+        .hero-title {
+            font-size: 2.35rem;
+            line-height: 1.1;
+            font-weight: 800;
+            margin-top: .35rem;
+        }
+
+        .hero-copy {
+            max-width: 760px;
+            opacity: .72;
+            margin-top: .55rem;
+            line-height: 1.55;
+        }
+
+        .status-pill {
+            display: inline-block;
+            padding: .3rem .7rem;
+            border-radius: 999px;
+            background: rgba(46,160,67,.12);
+            border: 1px solid rgba(46,160,67,.25);
+            color: #3fb950;
+            font-size: .78rem;
+            font-weight: 700;
+        }
+
+        .feature-note {
+            min-height: 130px;
+        }
+
+        .sidebar-brand {
+            font-size: 1.45rem;
+            font-weight: 800;
+            margin-bottom: .15rem;
+        }
+
+        .sidebar-tagline {
+            opacity: .62;
+            font-size: .82rem;
+            line-height: 1.4;
         }
 
         .stButton > button {
             border-radius: 10px;
-            font-weight: 600;
-        }
-
-        .stTextInput input {
-            border-radius: 10px;
-        }
-
-        div[data-testid="stMetric"] {
-            background-color: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.08);
-            padding: 1rem;
-            border-radius: 14px;
+            font-weight: 650;
         }
 
         [data-testid="stChatMessage"] {
             border-radius: 14px;
         }
 
-        footer {
-            visibility: hidden;
-        }
-
-        </style>
-        """
-    ),
+        footer { visibility: hidden; }
+    </style>
+    """,
     unsafe_allow_html=True,
 )
 
-
-# =================================================
-# DATABASE INITIALIZATION
-# =================================================
 
 initialize_database()
 
@@ -150,49 +150,18 @@ if "admin_authenticated" not in st.session_state:
 
 
 # =================================================
-# GET ADMIN PASSWORD
+# ADMIN PASSWORD
 # =================================================
 
 def get_admin_password():
-
-    # Try different possible names from secrets.toml
-    possible_secret_keys = [
-        "ADMIN_PASSWORD",
-        "admin_password",
-        "Admin_Password",
-        "ADMIN_PWD",
-        "admin_pwd",
-        "PASSWORD",
-    ]
-
-    for key in possible_secret_keys:
-
+    for key in ["ADMIN_PASSWORD", "admin_password", "ADMIN_PWD"]:
         try:
-
             if key in st.secrets:
                 return str(st.secrets[key])
-
         except Exception:
             pass
 
-
-    # Try environment variables as fallback
-    possible_env_keys = [
-        "ADMIN_PASSWORD",
-        "admin_password",
-        "ADMIN_PWD",
-        "admin_pwd",
-    ]
-
-    for key in possible_env_keys:
-
-        value = os.getenv(key)
-
-        if value:
-            return value
-
-
-    return None
+    return os.getenv("ADMIN_PASSWORD")
 
 
 # =================================================
@@ -200,656 +169,322 @@ def get_admin_password():
 # =================================================
 
 with st.sidebar:
-
-    st.title("✨ BookFlow AI")
-
-    st.caption(
-        "Intelligent bookings, powered by AI"
+    st.markdown(
+        f'<div class="sidebar-brand">🍽️ {RESTAURANT_NAME}</div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div class="sidebar-tagline">{RESTAURANT_TAGLINE}<br>Powered by BookFlow AI</div>',
+        unsafe_allow_html=True,
     )
 
     st.divider()
 
-
     page = st.radio(
-        "Navigation",
-        [
-            "💬 AI Assistant",
-            "🔐 Admin Dashboard",
-        ],
+        "Workspace",
+        ["💬 Guest Assistant", "🔐 Admin Dashboard"],
         label_visibility="collapsed",
     )
 
-
     st.divider()
 
-
-    # ---------------------------------------------
-    # KNOWLEDGE BASE
-    # ---------------------------------------------
-
-    st.subheader("📚 Knowledge Base")
-
+    st.subheader("📚 Restaurant Knowledge")
     st.caption(
-        "Upload PDFs to give your AI assistant "
-        "additional context."
+        "Upload menus, policies, opening hours, dietary information, or other restaurant PDFs."
     )
 
-
     uploaded_files = st.file_uploader(
-        "Upload PDF documents",
+        "Restaurant PDFs",
         type=["pdf"],
         accept_multiple_files=True,
     )
 
-
-    if st.button(
-        "⚡ Process Knowledge Base",
-        width="stretch",
-    ):
-
+    if st.button("⚡ Process Knowledge Base", width="stretch"):
         if not uploaded_files:
-
-            st.warning(
-                "Please upload at least one PDF."
-            )
-
+            st.warning("Please upload at least one restaurant PDF.")
         else:
-
             try:
-
                 all_chunks = []
-
-                with st.spinner(
-                    "Processing your documents..."
-                ):
-
+                with st.spinner("Reading and indexing restaurant documents..."):
                     for uploaded_file in uploaded_files:
+                        text = extract_text_from_pdf(uploaded_file)
+                        if text.strip():
+                            all_chunks.extend(chunk_text(text))
 
-                        text = extract_text_from_pdf(
-                            uploaded_file
-                        )
+                if not all_chunks:
+                    st.error("No readable text was found in the uploaded PDFs.")
+                else:
+                    st.session_state.vector_store = create_vector_store(all_chunks)
+                    st.success(f"Knowledge base ready · {len(all_chunks)} chunks indexed")
+            except Exception:
+                st.error("The PDF could not be processed. Please try another text-based PDF.")
 
-                        if text and text.strip():
-
-                            chunks = chunk_text(
-                                text
-                            )
-
-                            all_chunks.extend(
-                                chunks
-                            )
-
-
-                    if not all_chunks:
-
-                        st.error(
-                            "No readable text was found "
-                            "in the uploaded PDFs."
-                        )
-
-                    else:
-
-                        st.session_state.vector_store = (
-                            create_vector_store(
-                                all_chunks
-                            )
-                        )
-
-                        st.success(
-                            f"Successfully processed "
-                            f"{len(all_chunks)} text chunks!"
-                        )
-
-
-            except Exception as error:
-
-                st.error(
-                    f"Error processing PDFs: {error}"
-                )
-
-
-    # ---------------------------------------------
-    # KNOWLEDGE STATUS
-    # ---------------------------------------------
-
-    if st.session_state.vector_store is not None:
-
-        st.success(
-            "🟢 Knowledge Base Active"
-        )
-
+    if st.session_state.vector_store:
+        st.success("🟢 Restaurant knowledge active")
     else:
-
-        st.caption(
-            "⚪ No documents loaded"
-        )
-
+        st.caption("⚪ No restaurant documents loaded")
 
     st.divider()
 
-
-    # ---------------------------------------------
-    # NEW CHAT
-    # ---------------------------------------------
-
-    if st.button(
-        "🗑️ Start New Conversation",
-        width="stretch",
-    ):
-
+    if st.button("🗑️ Start New Conversation", width="stretch"):
         st.session_state.messages = []
-
-        st.session_state.booking = (
-            create_empty_booking()
-        )
-
+        st.session_state.booking = create_empty_booking()
         st.session_state.booking_active = False
-
-        st.session_state.awaiting_confirmation = (
-            False
-        )
-
+        st.session_state.awaiting_confirmation = False
         st.rerun()
 
 
-    st.divider()
-
-    st.caption(
-        "🤖 Gemini-powered assistant"
-    )
-
-
 # =================================================
-# ADMIN DASHBOARD
+# ADMIN PAGE
 # =================================================
 
 if page == "🔐 Admin Dashboard":
-
-    st.title("🔐 Admin Dashboard")
-
-    st.caption(
-        "Secure access to booking information"
-    )
-
-    st.divider()
-
+    st.title("🔐 Restaurant Admin Dashboard")
+    st.caption("Secure access to reservation information")
 
     if not st.session_state.admin_authenticated:
+        with st.container(border=True):
+            st.subheader("Admin Access")
+            st.caption("Enter the administrator password to continue.")
 
-        login_col1, login_col2, login_col3 = (
-            st.columns([1, 2, 1])
-        )
+            admin_password = st.text_input(
+                "Admin password",
+                type="password",
+                placeholder="Enter password",
+            )
 
+            if st.button("Unlock Dashboard", type="primary", width="stretch"):
+                correct_password = get_admin_password()
 
-        with login_col2:
-
-            with st.container(border=True):
-
-                st.markdown("### 🔐 Admin Access")
-
-                st.caption(
-                    "Enter your administrator password "
-                    "to access booking information."
-                )
-
-
-                admin_password = st.text_input(
-                    "Admin password",
-                    type="password",
-                    placeholder="Enter your password",
-                )
-
-
-                if st.button(
-                    "Unlock Dashboard",
-                    type="primary",
-                    width="stretch",
-                ):
-
-                    correct_password = (
-                        get_admin_password()
-                    )
-
-
-                    if not correct_password:
-
-                        st.error(
-                            "Admin password is not configured. "
-                            "The app could not find the password "
-                            "in Streamlit secrets."
-                        )
-
-                    elif admin_password == correct_password:
-
-                        st.session_state.admin_authenticated = (
-                            True
-                        )
-
-                        st.rerun()
-
-                    else:
-
-                        st.error(
-                            "Incorrect password."
-                        )
-
+                if not correct_password:
+                    st.error("Admin password is not configured in secrets.")
+                elif admin_password == correct_password:
+                    st.session_state.admin_authenticated = True
+                    st.rerun()
+                else:
+                    st.error("Incorrect password.")
 
         st.stop()
 
-
-    # ---------------------------------------------
-    # LOGGED IN ADMIN
-    # ---------------------------------------------
-
-    header_col, logout_col = st.columns(
-        [6, 1]
-    )
-
-
-    with header_col:
-
-        st.caption(
-            "Manage and monitor customer bookings."
-        )
-
-
-    with logout_col:
-
-        if st.button(
-            "Logout",
-            width="stretch",
-        ):
-
-            st.session_state.admin_authenticated = (
-                False
-            )
-
+    left, right = st.columns([6, 1])
+    with left:
+        st.caption("Monitor and search restaurant reservations.")
+    with right:
+        if st.button("Logout", width="stretch"):
+            st.session_state.admin_authenticated = False
             st.rerun()
 
-
     st.divider()
-
-
     show_admin_dashboard()
-
     st.stop()
 
 
 # =================================================
-# MAIN AI ASSISTANT PAGE
+# GUEST PAGE
 # =================================================
 
-st.title("Your Intelligent Booking Assistant")
-
-st.caption(
-    "Ask questions, create bookings, or upload "
-    "documents and ask questions about them."
+st.markdown(
+    f"""
+    <div class="restaurant-hero">
+        <div class="status-pill">● AI ASSISTANT ONLINE</div>
+        <div class="eyebrow">{RESTAURANT_NAME}</div>
+        <div class="hero-title">Your table, sorted. 🍽️</div>
+        <div class="hero-copy">
+            {RESTAURANT_DESCRIPTION}
+            Ask about the restaurant, upload a document, or tell me naturally that you'd like a table.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
 )
 
-
-# =================================================
-# HERO / FEATURE SECTION
-# =================================================
 
 if not st.session_state.messages:
+    c1, c2, c3 = st.columns(3)
 
-    st.divider()
-
-
-    col1, col2, col3 = st.columns(3)
-
-
-    with col1:
-
+    with c1:
         with st.container(border=True):
+            st.markdown("## 🍽️")
+            st.markdown("### Reserve a Table")
+            st.caption("Try: “Book dinner for 4 tomorrow at 8 PM.”")
 
-            st.markdown("## 📅")
-
-            st.markdown(
-                "### Create a Booking"
-            )
-
-            st.caption(
-                "Tell me what you need and I will "
-                "guide you through the booking process."
-            )
-
-
-    with col2:
-
+    with c2:
         with st.container(border=True):
-
             st.markdown("## 📄")
+            st.markdown("### Ask the Restaurant")
+            st.caption("Upload a menu or policy PDF and ask questions about it.")
 
-            st.markdown(
-                "### Ask Your Documents"
-            )
-
-            st.caption(
-                "Upload PDF documents and ask questions "
-                "using information from them."
-            )
-
-
-    with col3:
-
+    with c3:
         with st.container(border=True):
-
             st.markdown("## 🧠")
-
-            st.markdown(
-                "### Context Aware"
-            )
-
-            st.caption(
-                "The assistant remembers recent "
-                "conversation context for better "
-                "follow-up responses."
-            )
-
+            st.markdown("### Context Aware")
+            st.caption("The assistant uses recent conversation context for follow-ups.")
 
     st.divider()
 
-
-# =================================================
-# CHAT HISTORY
-# =================================================
 
 for message in st.session_state.messages:
-
-    with st.chat_message(
-        message["role"]
-    ):
-
-        st.markdown(
-            message["content"]
-        )
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
 
-# =================================================
-# CHAT INPUT
-# =================================================
-
-user_input = st.chat_input(
-    "Message BookFlow AI..."
-)
-
+user_input = st.chat_input("Message the restaurant assistant...")
 
 if user_input:
-
-    # ---------------------------------------------
-    # SHOW USER MESSAGE
-    # ---------------------------------------------
-
     with st.chat_message("user"):
+        st.markdown(user_input)
 
-        st.markdown(
-            user_input
-        )
-
+    st.session_state.messages.append({
+        "role": "user",
+        "content": user_input,
+    })
 
     # ---------------------------------------------
-    # SAVE USER MESSAGE
+    # CONFIRMATION
     # ---------------------------------------------
-
-    st.session_state.messages.append(
-        {
-            "role": "user",
-            "content": user_input,
-        }
-    )
-
-
-    # =================================================
-    # BOOKING CONFIRMATION
-    # =================================================
-
     if st.session_state.awaiting_confirmation:
+        response = user_input.strip().lower()
 
-        response = (
-            user_input
-            .strip()
-            .lower()
-        )
-
-
-        if response in [
-            "yes",
-            "y",
-            "confirm",
-        ]:
-
+        if response in {"yes", "y", "confirm"}:
             try:
+                result = booking_persistence_tool(st.session_state.booking)
+                booking_id = result["booking_id"]
 
-                booking_id = save_booking(
-                    st.session_state.booking
+                email_sent, _email_message = send_booking_confirmation(
+                    st.session_state.booking,
+                    booking_id,
                 )
-
-
-                email_sent, email_message = (
-                    send_booking_confirmation(
-                        st.session_state.booking,
-                        booking_id,
-                    )
-                )
-
 
                 if email_sent:
-
                     bot_response = (
-                        "## 🎉 Booking Confirmed!\n\n"
-                        f"Your **Booking ID is #{booking_id}**.\n\n"
-                        "Your booking has been saved successfully "
-                        "and a confirmation email has been sent to "
+                        "## 🎉 Reservation Confirmed\n\n"
+                        f"Your reservation ID is **#{booking_id}**.\n\n"
+                        "A confirmation email has been sent to "
                         f"**{st.session_state.booking['email']}**."
                     )
-
                 else:
-
                     bot_response = (
-                        "## 🎉 Booking Confirmed!\n\n"
-                        f"Your **Booking ID is #{booking_id}**.\n\n"
-                        "Your booking was saved successfully. "
-                        "However, the confirmation email could "
-                        "not be sent."
+                        "## ✅ Reservation Confirmed\n\n"
+                        f"Your reservation ID is **#{booking_id}**.\n\n"
+                        "Your reservation was saved successfully, but the confirmation email could not be sent."
                     )
 
-
-                st.session_state.booking = (
-                    create_empty_booking()
-                )
-
+                st.session_state.booking = create_empty_booking()
                 st.session_state.booking_active = False
+                st.session_state.awaiting_confirmation = False
 
-                st.session_state.awaiting_confirmation = (
-                    False
-                )
-
-
-            except Exception as error:
-
+            except Exception:
                 bot_response = (
-                    "❌ Something went wrong while saving "
-                    "your booking."
+                    "❌ I couldn't complete the reservation right now. "
+                    "Please try confirming again."
                 )
 
-
-        elif response in [
-            "no",
-            "n",
-            "cancel",
-        ]:
-
+        elif response in {"no", "n", "cancel"}:
             bot_response = (
-                "❌ Your booking has been cancelled. "
-                "No information was saved."
+                "No problem — the reservation was cancelled and nothing was saved."
             )
-
-
-            st.session_state.booking = (
-                create_empty_booking()
-            )
-
+            st.session_state.booking = create_empty_booking()
             st.session_state.booking_active = False
-
-            st.session_state.awaiting_confirmation = (
-                False
-            )
-
+            st.session_state.awaiting_confirmation = False
 
         else:
+            bot_response = "Please reply **YES** to confirm or **NO** to cancel."
 
-            bot_response = (
-                "Please reply **YES** to confirm your booking "
-                "or **NO** to cancel it."
-            )
-
-
-    # =================================================
-    # ACTIVE BOOKING FLOW
-    # =================================================
-
-    elif st.session_state.booking_active:
-
-        missing_fields = get_missing_fields(
-            st.session_state.booking
-        )
-
-
-        current_field = missing_fields[0]
-
-
-        success, message = update_booking_field(
-            st.session_state.booking,
-            current_field,
-            user_input,
-        )
-
-
-        if not success:
-
-            bot_response = message
-
-
-        else:
-
-            missing_fields = get_missing_fields(
-                st.session_state.booking
-            )
-
-
-            if missing_fields:
-
-                bot_response = get_next_question(
-                    st.session_state.booking
-                )
-
-
-            else:
-
-                bot_response = format_booking_summary(
-                    st.session_state.booking
-                )
-
-                st.session_state.awaiting_confirmation = (
-                    True
-                )
-
-
-    # =================================================
-    # NEW REQUEST
-    # =================================================
-
+    # ---------------------------------------------
+    # BOOKING / GEMINI EXTRACTION
+    # ---------------------------------------------
     else:
+        try:
+            analysis = analyze_message(
+                user_input,
+                st.session_state.booking,
+                st.session_state.booking_active,
+            )
+        except Exception:
+            analysis = {
+                "intent": "unclear",
+                "name": None,
+                "email": None,
+                "phone": None,
+                "number_of_guests": None,
+                "date": None,
+                "time": None,
+                "occasion": None,
+                "dietary_requirements": None,
+                "special_requests": None,
+            }
 
-        intent = detect_intent(
-            user_input
-        )
+        intent = analysis.get("intent", "unclear")
 
-
-        # ---------------------------------------------
-        # BOOKING INTENT
-        # ---------------------------------------------
-
-        if intent == "booking":
-
+        if intent == "booking" or st.session_state.booking_active:
             st.session_state.booking_active = True
 
-
-            bot_response = (
-                "Absolutely! 📅 Let's get your booking "
-                "set up.\n\n"
-                +
-                get_next_question(
-                    st.session_state.booking
-                )
+            # Extract everything Gemini understood from this message.
+            merge_extracted_details(
+                st.session_state.booking,
+                analysis,
             )
 
+            # Validate extracted required details that are present.
+            validation_message = None
+            for field in [
+                "name",
+                "email",
+                "phone",
+                "number_of_guests",
+                "date",
+                "time",
+            ]:
+                value = st.session_state.booking.get(field)
+                if not value:
+                    continue
 
-        # ---------------------------------------------
-        # GENERAL / RAG QUESTION
-        # ---------------------------------------------
+                candidate = str(value)
+                check_booking = dict(st.session_state.booking)
+                check_booking[field] = None
+                success, message = update_booking_field(
+                    check_booking,
+                    field,
+                    candidate,
+                )
+                if not success:
+                    st.session_state.booking[field] = None
+                    validation_message = message
+                    break
+
+            if validation_message:
+                bot_response = validation_message
+            else:
+                missing = get_missing_fields(st.session_state.booking)
+
+                if missing:
+                    bot_response = get_next_question(st.session_state.booking)
+                else:
+                    bot_response = format_booking_summary(
+                        st.session_state.booking
+                    )
+                    st.session_state.awaiting_confirmation = True
 
         else:
-
             try:
-
-                with st.spinner(
-                    "BookFlow AI is thinking..."
-                ):
-
-                    bot_response = (
-                        generate_general_response(
-                            message=user_input,
-                            chat_history=(
-                                st.session_state.messages
-                            ),
-                            vector_store=(
-                                st.session_state.vector_store
-                            ),
-                        )
+                with st.spinner("Thinking..."):
+                    bot_response = generate_general_response(
+                        message=user_input,
+                        chat_history=st.session_state.messages,
+                        vector_store=st.session_state.vector_store,
                     )
-
-
-            except Exception as error:
-
+            except Exception:
                 bot_response = (
-                    "⚠️ I couldn't generate a response "
-                    "right now. Please try again."
+                    "⚠️ I couldn't generate a response right now. Please try again in a moment."
                 )
 
-
-    # =================================================
-    # SHOW ASSISTANT RESPONSE
-    # =================================================
-
     with st.chat_message("assistant"):
+        st.markdown(bot_response)
 
-        st.markdown(
-            bot_response
-        )
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": bot_response,
+    })
 
-
-    # =================================================
-    # SAVE ASSISTANT RESPONSE
-    # =================================================
-
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": bot_response,
-        }
-    )
-
-
-    # =================================================
-    # KEEP LAST 25 MESSAGES
-    # =================================================
-
-    if len(
-        st.session_state.messages
-    ) > 25:
-
-        st.session_state.messages = (
-            st.session_state.messages[-25:]
-        )
+    if len(st.session_state.messages) > MEMORY_LIMIT:
+        st.session_state.messages = st.session_state.messages[-MEMORY_LIMIT:]

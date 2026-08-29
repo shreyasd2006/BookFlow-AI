@@ -1,543 +1,171 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
 
 from db.database import get_all_bookings
 
 
-# =================================================
-# ADMIN DASHBOARD
-# =================================================
+def _status_badge(status):
+    value = str(status).lower()
+    if value == "confirmed":
+        return "✅ Confirmed"
+    if value == "cancelled":
+        return "❌ Cancelled"
+    return str(status)
+
 
 def show_admin_dashboard():
-
     try:
-
-        # ---------------------------------------------
-        # LOAD BOOKINGS
-        # ---------------------------------------------
-
         bookings = get_all_bookings()
 
-
-        # ---------------------------------------------
-        # EMPTY STATE
-        # ---------------------------------------------
-
         if not bookings:
-
             with st.container(border=True):
-
-                st.markdown("## 📭 No bookings yet")
-
+                st.markdown("## 📭 No reservations yet")
                 st.caption(
-                    "Customer bookings will appear here "
-                    "after they are confirmed."
+                    "Confirmed restaurant reservations will appear here."
                 )
-
             return
 
-
-        # ---------------------------------------------
-        # CREATE DATAFRAME
-        # ---------------------------------------------
-
-        df = pd.DataFrame(
-            bookings
-        )
-
-
-        # ---------------------------------------------
-        # CONVERT CREATED AT
-        # ---------------------------------------------
-
-        if "created_at" in df.columns:
-
-            df["created_at"] = pd.to_datetime(
-                df["created_at"],
-                errors="coerce",
-            )
-
-
-        # =================================================
-        # OVERVIEW
-        # =================================================
-
-        st.subheader(
-            "📊 Booking Overview"
-        )
-
+        df = pd.DataFrame(bookings)
 
         total_bookings = len(df)
-
-
-        # ---------------------------------------------
-        # UNIQUE CUSTOMERS
-        # ---------------------------------------------
-
-        if "email" in df.columns:
-
-            total_customers = (
-                df["email"]
-                .astype(str)
-                .nunique()
-            )
-
-        else:
-
-            total_customers = 0
-
-
-        # ---------------------------------------------
-        # CONFIRMED BOOKINGS
-        # ---------------------------------------------
-
-        if "status" in df.columns:
-
-            confirmed_bookings = len(
-
-                df[
-                    df["status"]
-                    .astype(str)
-                    .str.lower()
-                    ==
-                    "confirmed"
-                ]
-
-            )
-
-        else:
-
-            confirmed_bookings = total_bookings
-
-
-        # ---------------------------------------------
-        # TODAY'S BOOKINGS
-        # ---------------------------------------------
-
-        today_bookings = 0
-
-
-        date_column = None
-
-
-        for possible_column in [
-            "date",
-            "booking_date",
-        ]:
-
-            if possible_column in df.columns:
-
-                date_column = possible_column
-
-                break
-
-
-        if date_column:
-
-            today_string = (
-                pd.Timestamp.today()
-                .strftime("%Y-%m-%d")
-            )
-
-
-            today_bookings = len(
-
-                df[
-                    df[date_column]
-                    .astype(str)
-                    .str.startswith(
-                        today_string,
-                        na=False,
-                    )
-                ]
-
-            )
-
-
-        # ---------------------------------------------
-        # METRIC CARDS
-        # ---------------------------------------------
-
-        col1, col2, col3, col4 = (
-            st.columns(4)
+        total_customers = df["email"].nunique() if "email" in df else 0
+        confirmed = (
+            df["status"].astype(str).str.lower().eq("confirmed").sum()
+            if "status" in df
+            else total_bookings
+        )
+        total_guests = (
+            pd.to_numeric(df["number_of_guests"], errors="coerce")
+            .fillna(0)
+            .sum()
+            if "number_of_guests" in df
+            else 0
         )
 
+        st.subheader("📊 Reservation Overview")
 
-        with col1:
-
-            st.metric(
-                "📅 Total Bookings",
-                total_bookings,
-            )
-
-
-        with col2:
-
-            st.metric(
-                "👥 Customers",
-                total_customers,
-            )
-
-
-        with col3:
-
-            st.metric(
-                "✅ Confirmed",
-                confirmed_bookings,
-            )
-
-
-        with col4:
-
-            st.metric(
-                "📍 Today",
-                today_bookings,
-            )
-
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Reservations", total_bookings)
+        with c2:
+            st.metric("Customers", total_customers)
+        with c3:
+            st.metric("Confirmed", int(confirmed))
+        with c4:
+            st.metric("Guests", int(total_guests))
 
         st.divider()
 
-
-        # =================================================
-        # SEARCH
-        # =================================================
-
-        st.subheader(
-            "🔎 Find Bookings"
+        st.subheader("🔎 Find Reservations")
+        search = st.text_input(
+            "Search",
+            placeholder="Name, email, phone, occasion, or request...",
+            label_visibility="collapsed",
         )
 
+        use_date_filter = st.checkbox("Filter by reservation date")
+        selected_date = None
+        if use_date_filter:
+            selected_date = st.date_input("Reservation date")
 
-        search_query = st.text_input(
-            "Search bookings",
-            placeholder=(
-                "Search by name, email, phone, "
-                "or booking type..."
-            ),
-        )
+        filtered = df.copy()
 
-
-        filtered_df = df.copy()
-
-
-        if search_query:
-
-            search_value = (
-                search_query
-                .strip()
-                .lower()
-            )
-
-
-            searchable_columns = [
-
+        if search:
+            term = search.strip().lower()
+            searchable = [
                 "name",
-
                 "email",
-
                 "phone",
-
+                "occasion",
+                "special_requests",
+                "dietary_requirements",
                 "booking_type",
-
-                "service",
-
             ]
-
-
-            mask = pd.Series(
-                False,
-                index=filtered_df.index,
-            )
-
-
-            for column in searchable_columns:
-
-                if column in filtered_df.columns:
-
-                    mask = (
-
-                        mask
-
-                        |
-
-                        filtered_df[column]
+            mask = pd.Series(False, index=filtered.index)
+            for column in searchable:
+                if column in filtered.columns:
+                    mask |= (
+                        filtered[column]
                         .astype(str)
                         .str.lower()
-                        .str.contains(
-                            search_value,
-                            na=False,
-                        )
-
+                        .str.contains(term, na=False)
                     )
+            filtered = filtered[mask]
 
-
-            filtered_df = (
-                filtered_df[mask]
-            )
-
-
-        # =================================================
-        # DATE FILTER
-        # =================================================
-
-        if date_column:
-
-            selected_date = st.date_input(
-                "Filter by booking date",
-                value=None,
-            )
-
-
-            if selected_date:
-
-                selected_date_string = (
-                    selected_date.strftime(
-                        "%Y-%m-%d"
-                    )
-                )
-
-
-                filtered_df = (
-
-                    filtered_df[
-
-                        filtered_df[date_column]
-                        .astype(str)
-                        .str.startswith(
-                            selected_date_string,
-                            na=False,
-                        )
-
-                    ]
-
-                )
-
-
-        # =================================================
-        # BOOKING RECORDS
-        # =================================================
+        if selected_date is not None and "date" in filtered.columns:
+            selected = selected_date.strftime("%Y-%m-%d")
+            filtered = filtered[
+                filtered["date"].astype(str).str.startswith(selected, na=False)
+            ]
 
         st.divider()
+        st.subheader(f"📋 Reservations · {len(filtered)} results")
 
-
-        records_col, count_col = (
-            st.columns([5, 1])
-        )
-
-
-        with records_col:
-
-            st.subheader(
-                "📋 Booking Records"
-            )
-
-
-        with count_col:
-
-            st.metric(
-                "Results",
-                len(filtered_df),
-            )
-
-
-        # ---------------------------------------------
-        # EMPTY FILTER RESULT
-        # ---------------------------------------------
-
-        if filtered_df.empty:
-
-            st.info(
-                "No bookings match your search or filters."
-            )
-
+        if filtered.empty:
+            st.info("No reservations match the current filters.")
             return
 
-
-        # ---------------------------------------------
-        # DISPLAY COPY
-        # ---------------------------------------------
-
-        display_df = (
-            filtered_df.copy()
-        )
-
-
-        # ---------------------------------------------
-        # FORMAT TIMESTAMP
-        # ---------------------------------------------
+        display_df = filtered.copy()
 
         if "created_at" in display_df.columns:
+            created = pd.to_datetime(display_df["created_at"], errors="coerce")
+            display_df["created_at"] = created.dt.strftime(
+                "%d %b %Y, %I:%M %p"
+            ).fillna("")
 
-            display_df["created_at"] = (
-
-                pd.to_datetime(
-                    display_df["created_at"],
-                    errors="coerce",
-                )
-
-                .dt.strftime(
-                    "%d %b %Y, %I:%M %p"
-                )
-
-                .fillna("")
-
-            )
-
-
-        # ---------------------------------------------
-        # FRIENDLY COLUMN NAMES
-        # ---------------------------------------------
-
-        column_names = {
-
-            "id": "Booking ID",
-
-            "booking_id": "Booking ID",
-
-            "name": "Customer",
-
-            "email": "Email",
-
-            "phone": "Phone",
-
-            "booking_type": "Booking Type",
-
-            "service": "Service",
-
-            "date": "Date",
-
-            "booking_date": "Date",
-
-            "time": "Time",
-
-            "booking_time": "Time",
-
-            "status": "Status",
-
-            "created_at": "Created",
-
-        }
-
+        if "status" in display_df.columns:
+            display_df["status"] = display_df["status"].map(_status_badge)
 
         display_df = display_df.rename(
-            columns=column_names
+            columns={
+                "id": "Reservation ID",
+                "name": "Customer",
+                "email": "Email",
+                "phone": "Phone",
+                "booking_type": "Type",
+                "number_of_guests": "Guests",
+                "date": "Date",
+                "time": "Time",
+                "occasion": "Occasion",
+                "dietary_requirements": "Dietary",
+                "special_requests": "Special Requests",
+                "status": "Status",
+                "created_at": "Created",
+            }
         )
 
-
-        # ---------------------------------------------
-        # ORDER IMPORTANT COLUMNS
-        # ---------------------------------------------
-
-        preferred_columns = [
-
-            "Booking ID",
-
+        columns = [
+            "Reservation ID",
             "Customer",
-
-            "Email",
-
-            "Phone",
-
-            "Booking Type",
-
-            "Service",
-
+            "Guests",
             "Date",
-
             "Time",
-
+            "Email",
+            "Phone",
+            "Occasion",
+            "Dietary",
+            "Special Requests",
             "Status",
-
             "Created",
-
         ]
-
-
-        available_columns = [
-
-            column
-
-            for column
-            in preferred_columns
-
-            if column
-            in display_df.columns
-
-        ]
-
-
-        # Include unexpected database columns too
-
-        remaining_columns = [
-
-            column
-
-            for column
-            in display_df.columns
-
-            if column
-            not in available_columns
-
-        ]
-
-
-        display_columns = (
-            available_columns
-            +
-            remaining_columns
-        )
-
-
-        display_df = (
-            display_df[
-                display_columns
-            ]
-        )
-
-
-        # =================================================
-        # DISPLAY TABLE
-        # =================================================
+        columns = [column for column in columns if column in display_df.columns]
 
         st.dataframe(
-            display_df,
+            display_df[columns],
             width="stretch",
             hide_index=True,
             height=500,
         )
 
-
-        # =================================================
-        # DOWNLOAD CSV
-        # =================================================
-
-        csv_data = (
-            display_df
-            .to_csv(
-                index=False
-            )
-            .encode("utf-8")
-        )
-
-
+        csv_data = display_df[columns].to_csv(index=False).encode("utf-8")
         st.download_button(
-            label="⬇️ Download Booking Data (CSV)",
+            "⬇️ Export reservations as CSV",
             data=csv_data,
-            file_name="bookflow_bookings.csv",
+            file_name="bookflow_reservations.csv",
             mime="text/csv",
         )
 
-
     except Exception as error:
-
-        st.error(
-            "Could not load booking information."
-        )
-
-
-        with st.expander(
-            "Show technical details"
-        ):
-
-            st.code(
-                str(error)
-            )
+        st.error("Could not load reservation information.")
+        with st.expander("Technical details"):
+            st.code(str(error))

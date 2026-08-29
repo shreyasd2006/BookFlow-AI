@@ -1,226 +1,95 @@
-# ✨ BookFlow AI
+# 🍽️ BookFlow AI
 
-> An intelligent, AI-powered booking assistant with conversational booking flows, document-aware answers, recent conversation memory, and an admin dashboard.
+BookFlow AI is an AI-powered **restaurant reservation assistant** built with Streamlit and Google Gemini.
 
-## 🚀 Overview
+It combines conversational booking, RAG over uploaded restaurant PDFs, short-term conversation memory, SQLite persistence, email confirmation, and a password-protected admin dashboard.
 
-BookFlow AI allows users to interact with an AI assistant to:
+## Features
 
-- 📅 Create and manage bookings through natural conversation
-- 📄 Upload PDF documents as a knowledge base
-- 🧠 Ask questions using information extracted from uploaded documents
-- 💬 Maintain recent conversation context for follow-up questions
-- 📧 Send booking-related email notifications
-- 🔐 Securely access an admin dashboard
-- 📊 View and manage stored booking information
+- 🤖 Gemini-powered restaurant conversation and intent understanding
+- 🍽️ Natural-language table reservation workflow
+- 📄 PDF knowledge base with text extraction, chunking, Gemini embeddings, and similarity retrieval
+- 🧠 Recent conversation memory (25 messages stored; latest 20 used for AI context)
+- 💾 SQLite customer + reservation storage
+- 📧 Gmail SMTP confirmation emails
+- 🔐 Admin authentication and reservation dashboard
+- 📊 Reservation search/filter and CSV export
+- ☁️ Streamlit Community Cloud deployment
 
-The application uses **Google Gemini** for AI responses and runs with a **Streamlit** frontend.
-
----
-
-## ✨ Key Features
-
-### 🤖 AI Booking Assistant
-Users can describe what they need in natural language. The assistant collects the required booking details and guides them through the booking process conversationally.
-
-### 📚 PDF Knowledge Base
-PDF documents can be uploaded and processed into text chunks. Relevant document content is retrieved and provided to the AI when answering document-related questions.
-
-### 🧠 Conversation Memory
-The assistant keeps recent conversation history in memory so that follow-up questions can be understood in context.
-
-### 📧 Email Notifications
-The application includes an email service for sending booking-related notifications when configured.
-
-### 🔐 Admin Dashboard
-The dashboard is protected using an admin password stored securely in Streamlit secrets. It provides access to booking information and management features.
-
-### 💾 SQLite Database
-Bookings are stored locally using SQLite, making the project simple to run and deploy without requiring an external database.
-
----
-
-## 🛠️ Tech Stack
-
-- **Python**
-- **Streamlit**
-- **Google Gemini API**
-- **Hugging Face / Sentence Transformers** for embeddings
-- **FAISS** for similarity search
-- **PyPDF** for PDF text extraction
-- **SQLite**
-- **GitHub**
-- **Streamlit Community Cloud**
-
----
-
-## 📁 Project Structure
+## Architecture
 
 ```text
-AI_Chatbot/
-│
-├── .streamlit/
-│   └── secrets.toml
-│
+User
+  ↓
+Streamlit UI
+  ↓
+Gemini intent + detail extraction
+  ├── Restaurant Q&A → RAG retrieval → Gemini response
+  └── Reservation flow → validation → confirmation
+                                  ↓
+                         SQLite + Email tools
+                                  ↓
+                           Admin Dashboard
+```
+
+## Project Structure
+
+```text
+BookFlow-AI/
 ├── app/
 │   ├── main.py
 │   ├── chat_logic.py
 │   ├── booking_flow.py
 │   ├── rag_pipeline.py
-│   ├── admin_dashboard.py
-│   ├── database.py
+│   ├── tools.py
 │   ├── email_service.py
-│   ├── config.py
-│   └── tools.py
-│
+│   ├── admin_dashboard.py
+│   └── config.py
 ├── db/
-│   ├── __init__.py
 │   └── database.py
-│
 ├── docs/
+├── .streamlit/
+│   └── secrets.toml
 ├── requirements.txt
-├── .gitignore
 └── README.md
 ```
 
----
-
-## ⚙️ Local Setup
-
-### 1. Clone the repository
-
-```bash
-git clone <your-repository-url>
-cd AI_Chatbot
-```
-
-### 2. Create and activate a virtual environment
+## Local Setup
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-### 3. Install dependencies
-
-```bash
 pip install -r requirements.txt
+streamlit run app/main.py
 ```
 
-### 4. Configure Streamlit secrets
+## Secrets
 
-Create:
-
-```text
-.streamlit/secrets.toml
-```
-
-Example:
+Create `.streamlit/secrets.toml`:
 
 ```toml
 GEMINI_API_KEY = "your_gemini_api_key"
 ADMIN_PASSWORD = "your_admin_password"
+SENDER_EMAIL = "your_sender_gmail@gmail.com"
+SENDER_APP_PASSWORD = "your_gmail_app_password"
 ```
 
-Add any additional email-related secrets required by your configuration.
+Never commit `secrets.toml` to GitHub.
 
-> Never commit `secrets.toml` to GitHub.
+## RAG Knowledge Base
 
-### 5. Run the application
+Upload one or more restaurant PDFs such as a menu, opening-hours document, cancellation policy, dietary information, or restaurant guide. The system extracts and chunks the text, creates Gemini embeddings, retrieves relevant chunks for a question, and blends that context into the Gemini response.
 
-From the project root:
+## Deployment
 
-```powershell
-streamlit run app/main.py
-```
-
-Open the local URL shown in the terminal.
-
----
-
-## 📄 Using the Knowledge Base
-
-1. Open the AI Assistant.
-2. Upload one or more PDF files.
-3. Click **Process Knowledge Base**.
-4. Wait for the PDFs to be converted into searchable text chunks.
-5. Ask questions related to the uploaded documents.
-
-The assistant retrieves relevant chunks before generating its response.
-
----
-
-## 🔐 Admin Dashboard
-
-The Admin Dashboard is protected with the password stored in:
-
-```text
-.streamlit/secrets.toml
-```
-
-Example:
-
-```toml
-ADMIN_PASSWORD = "your_secure_password"
-```
-
-Do not hard-code the password directly inside the Python source code.
-
----
-
-## 🌐 Deployment
-
-The project can be deployed using **Streamlit Community Cloud**:
-
-1. Push the project to GitHub.
-2. Create a new Streamlit Community Cloud application.
-3. Select the repository and set the entry point to:
+The Streamlit entry point is:
 
 ```text
 app/main.py
 ```
 
-4. Add the required values from `secrets.toml` through the deployment platform's secrets configuration.
-5. Deploy.
+Add the same secret keys through Streamlit Community Cloud's Secrets settings when deploying.
 
----
+## Note on SQLite
 
-## 🔒 Security Notes
-
-- API keys and passwords are stored outside the source code.
-- `.streamlit/secrets.toml` should remain in `.gitignore`.
-- The admin dashboard requires password authentication.
-- Uploaded documents are processed for retrieval-based answering.
-
----
-
-## 🎯 Project Highlights
-
-BookFlow AI combines several AI application concepts in one project:
-
-- Conversational AI
-- Tool-assisted booking workflows
-- Retrieval-Augmented Generation (RAG)
-- PDF knowledge retrieval
-- Conversation memory
-- Secure secret handling
-- Database-backed booking storage
-- Cloud deployment
-
----
-
-## 📌 Future Improvements
-
-- User authentication
-- Persistent user-specific chat history
-- Booking cancellation and modification flows
-- External calendar integration
-- Cloud database migration
-- Analytics and reporting
-- Role-based admin access
-
----
-
-## 👨‍💻 Author
-
-Built as an AI-powered booking assistant project using Python, Streamlit, Gemini, RAG, and SQLite.
+SQLite is used because the assignment permits it. Local/cloud SQLite storage should be treated as demo storage and may reset on Streamlit Cloud restarts or redeployments.
